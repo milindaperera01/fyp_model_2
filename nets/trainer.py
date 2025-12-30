@@ -120,7 +120,10 @@ class Trainer:
                 #pred = model(features['inputs'])
                 loss += self.loss_fn(pred, y).item()
                 y_true.append(y)
-                y_hat.append(pred.argmax(1))
+                #y_hat.append(pred.argmax(1))
+                probs = torch.sigmoid(pred)
+                y_hat.append((probs > 0.5).long())
+
 
         loss /= batch_ix + 1
 
