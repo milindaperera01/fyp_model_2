@@ -1,56 +1,104 @@
 import glob
 import torch
-import torch.nn as nn
 from torch.utils.data import DataLoader
+from nets.dataset import StressEEGDataset, split_dataset
+from nets.model import HEEGNetStress
+import torch.nn as nn
 
-from datasets.stress_dataset import StressEEGDataset, split_dataset
-from models.heegnet_stress import HEEGNetStress
-from nets.trainer import Trainer
-from nets.callbacks import EarlyStopping, ModelCheckpoint
+def main():
+    # ------------------------
+    # Device setup
+    # ------------------------
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print("[TRAIN] Using device:", device)
 
-# ───────────────── CONFIG ─────────────────
-DATA_DIR = "./data_npz"
-INPUT_KEY = "X_RAW"   # CHANGE HERE ONLY
-BATCH_SIZE = 64
-EPOCHS = 100
-LR = 1e-3
-WEIGHT_DECAY = 1e-4
-DEVICE = "cuda"
-DTYPE = torch.float64
+    # ------------------------
+    # Load dataset
+    # ------------------------
+    data_dir = "/home/e20286/fyp/FYP/data/processed_32/stress_files/*.npz"
+    files = sorted(glob.glob(data_dir))
+    print("[TRAIN] Found", len(files), "NPZ files")
 
-# ───────────────── LOAD DATA ──────────────
-npz_files = sorted(glob.glob(f"{DATA_DIR}/*.npz"))
-assert len(npz_files) == 32, "Expected 32 NPZ files"
+    dataset = StressEEGDataset(files, input_key="X_RAW")
+    train_set, val_set = split_dataset(dataset)
 
-dataset = StressEEGDataset(npz_files, input_key=INPUT_KEY)
-train_set, val_set = split_dataset(dataset)
+    train_loader = DataLoader(train_set, batch_size=128, shuffle=True)
+    val_loader = DataLoader(val_set, batch_size=128)
 
-train_loader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True)
-val_loader = DataLoader(val_set, batch_size=BATCH_SIZE)
+    # ------------------------
+    # Initialize model
+    # ------------------------
+    model = HEEGNetStress(
+        num_classes=2,
+        chunk_size=124,
+        num_electrodes=32,
+        domain_adaptation=True,
+        dtype=torch.float32  # <-- important to match CrossEntropyLoss
+    ).to(device)
 
-# ───────────────── MODEL ──────────────────
-model = HEEGNetStress(
-    chunk_size=dataset.X.shape[-1],
-    num_electrodes=dataset.X.shape[1],
-    domains=list(range(len(npz_files))),
-    domain_adaptation=True,
-    device=DEVICE,
-    dtype=DTYPE
-)
+    print("[MODEL] Initialized HEEGNetStress")
 
-# ───────────────── TRAINER ────────────────
-trainer = Trainer(
-    max_epochs=EPOCHS,
-    min_epochs=20,
-    loss=nn.BCEWithLogitsLoss(),
-    callbacks=[
-        EarlyStopping(monitor="val_score", patience=15),
-        ModelCheckpoint(monitor="val_score", mode="max")
-    ],
-    device=DEVICE,
-    dtype=DTYPE,
-    lr=LR,
-    weight_decay=WEIGHT_DECAY
-)
+    # ------------------------
+    # Optimizer and loss
+    # ------------------------
+    optimizer = model.configure_optimizers(lr=0.01, weight_decay=1e-3)
+    criterion = nn.CrossEntropyLoss()  # logits: [B, 2], labels: [B]
 
-trainer.fit(model, train_loader, val_loader)
+    # ------------------------
+    # Training loop
+    # ------------------------
+    print("\n[TRAIN] Starting training...\n")
+    num_epochs = 15
+
+    for epoch in range(num_epochs):
+        model.train()
+        total_loss = 0.0
+
+        for batch_idx, (features, labels) in enumerate(train_loader):
+            # Convert to device and float32
+            x = features["inputs"].to(device=device, dtype=torch.float32)
+            d = features["domains"].to(device=device, dtype=torch.float32)
+            y = labels.to(device=device, dtype=torch.long)  # CrossEntropy requires long labels
+
+            optimizer.zero_grad()
+            logits, _ = model(x, d)
+            loss = criterion(logits, y)
+            loss.backward()
+            optimizer.step()
+
+            total_loss += loss.item()
+
+        avg_loss = total_loss / len(train_loader)
+        print(f"[EPOCH {epoch+1}/{num_epochs}] Train Loss: {avg_loss:.4f}")
+
+        # ------------------------
+        # Validation
+        # ------------------------
+        model.eval()
+        val_loss = 0.0
+        correct = 0
+        total = 0
+        with torch.no_grad():
+            for features, labels in val_loader:
+                x = features["inputs"].to(device=device, dtype=torch.float32)
+                d = features["domains"].to(device=device, dtype=torch.float32)
+                y = labels.to(device=device, dtype=torch.long)
+
+                logits, _ = model(x, d)
+                loss = criterion(logits, y)
+                val_loss += loss.item()
+
+                preds = logits.argmax(dim=1)
+                correct += (preds == y).sum().item()
+                total += y.size(0)
+
+        val_loss /= len(val_loader)
+        val_acc = correct / total
+        print(f"[EPOCH {epoch+1}/{num_epochs}] Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}\n")
+
+    print("[TRAIN] Training finished successfully")
+
+
+if __name__ == "__main__":
+    main()
+

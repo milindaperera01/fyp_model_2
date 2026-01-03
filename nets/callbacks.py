@@ -71,6 +71,40 @@ class MomentumBatchNormScheduler(ConstantMomentumBatchNormScheduler):
         for m in self.bn_modules_:
             m.set_eta(eta_test = 1. - self.eta_test_)
 
+class ModelCheckpoint(Callback):
+    """
+    Saves the model with the best monitored metric.
+    """
+
+    def __init__(self, monitor="val_score", mode="max", save_path="checkpoint.pt", verbose=True):
+        self.monitor = monitor
+        self.mode = mode
+        self.save_path = save_path
+        self.verbose = verbose
+        self.best = None
+
+    def on_train_epoch_end(self, trainer, net):
+        # get current metric from trainer.records
+        current = None
+        for record in trainer.records[::-1]:
+            if record["epoch"] == trainer.current_epoch and self.monitor in record:
+                current = record[self.monitor]
+                break
+        if current is None:
+            return
+
+        if self.best is None:
+            self.best = current
+            self._save(net)
+        else:
+            if (self.mode == "max" and current > self.best) or (self.mode == "min" and current < self.best):
+                self.best = current
+                self._save(net)
+
+    def _save(self, net):
+        if self.verbose:
+            print(f"ModelCheckpoint: saving model with {self.monitor}={self.best:.4f}")
+        torch.save(net.state_dict(), self.save_path)
 
 class EarlyStopping(Callback):
 
