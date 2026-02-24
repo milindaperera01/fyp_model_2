@@ -13,9 +13,9 @@ class HEEGNetStress(nn.Module):
         self,
         chunk_size: int = 124,
         num_electrodes: int = 32,
-        F1: int = 16,
-        F2: int = 32,
-        D: int = 2,
+        F1: int = 32,
+        F2: int = 96,
+        D: int = 4,
         bnorm_dispersion=bn.BatchNormDispersion.SCALAR,
         num_classes: int = 2,
         kernel_1: int = 32,
@@ -69,7 +69,7 @@ class HEEGNetStress(nn.Module):
         )
 
         self.ec1 = nn.Conv2d(F1*D, F1*D, (1, kernel_2), padding=(0, kernel_2//2), groups=F1*D, bias=False)
-        self.lc1 = LorentzConv2d(self.manifold, F1*D+1, F2+1, kernel_size=1, bias=False)
+        self.lc1 = LorentzConv2d(self.manifold, F2+1, F2+1, kernel_size=1, bias=False)
 
         # -------- SPD BatchNorm --------
         bn_shape = self._bn_dim()
@@ -100,14 +100,22 @@ class HEEGNetStress(nn.Module):
         self.lmlp = LorentzMLR(self.manifold, self._feature_dim(), num_classes)
         print("[MODEL] Lorentz flattened dim:", self._feature_dim())
 
+
     def _bn_dim(self):
         with torch.no_grad():
-            x = torch.zeros(1, 1, self.num_electrodes, self.chunk_size)
-            x = self.block1(x)
-            x = x.permute(0,2,3,1)
+            x = torch.zeros(1, self.num_electrodes, self.chunk_size)
+            domains = torch.zeros(1, dtype=torch.long)
+
+            x = x.unsqueeze(1)          # (B,1,E,T)
+            x = self.block1(x)          # -> (B,F1*D,1,T1)
+            x = self.ec1(x)             # -> (B,F1*D,1,T1)
+            x = self.block2(x)          # -> (B,F2,1,T2)
+
+            x = x.permute(0, 2, 3, 1)   # (B,1,T2,F2)
             x = F.normalize(x, dim=-1)
-            x = self.manifold.projx(F.pad(x, (1,0)))
-            x = self.lc1(x)
+            x = self.manifold.projx(F.pad(x, (1, 0)))  # (B,1,T2,F2+1)
+
+            x = self.lc1(x)             # output shape for BN
             return x.shape
 
     def _feature_dim(self):
@@ -125,7 +133,11 @@ class HEEGNetStress(nn.Module):
         x = F.normalize(x, dim=-1)
         x = self.manifold.projx(F.pad(x, (1,0)))
         x = self.lc1(x)
-        x = self.bn(x, domains)
+        if self.domain_adaptation:
+            x = self.bn(x, domains)
+        else:
+            x = self.bn(x)
+
         x = self.elu(x)
         x = self.avpool(x)
         return self.manifold.lorentz_flatten(x)

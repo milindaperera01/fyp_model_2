@@ -1,0 +1,28 @@
+Traceback (most recent call last):
+  File "/usr/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "/usr/lib/python3.10/runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "/home/e20286/fyp/fyp_model_2/nets/train.py", line 139, in <module>
+    
+  File "/home/e20286/fyp/fyp_model_2/nets/train.py", line 23, in main
+    train_set, val_set = split_dataset(dataset)
+  File "/home/e20286/fyp/fyp_model_2/nets/dataset.py", line 20, in __init__
+    X = data[input_key]              # (N, 32, T)
+  File "/home/e20286/fyp/env/lib/python3.10/site-packages/numpy/lib/npyio.py", line 256, in __getitem__
+    return format.read_array(bytes,
+  File "/home/e20286/fyp/env/lib/python3.10/site-packages/numpy/lib/format.py", line 831, in read_array
+    data = _read_bytes(fp, read_size, "array data")
+  File "/home/e20286/fyp/env/lib/python3.10/site-packages/numpy/lib/format.py", line 966, in _read_bytes
+    r = fp.read(size - len(data))
+  File "/usr/lib/python3.10/zipfile.py", line 946, in read
+    data = self._read1(n)
+  File "/usr/lib/python3.10/zipfile.py", line 1016, in _read1
+    data = self._read2(n)
+  File "/usr/lib/python3.10/zipfile.py", line 1046, in _read2
+    data = self._fileobj.read(n)
+  File "/usr/lib/python3.10/zipfile.py", line 766, in read
+    data = self._file.read(n)
+KeyboardInterrupt
+[TRAIN] Using device: cuda
+[TRAIN] Found 32 NPZ files

@@ -1,4 +1,7 @@
 import glob
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
 import os
 import torch
 from torch.utils.data import DataLoader
@@ -6,9 +9,7 @@ from nets.dataset import StressEEGDataset, split_dataset
 from nets.model import HEEGNetStress
 import torch.nn as nn
 from torch.utils.data import DataLoader, WeightedRandomSampler
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
+from torch.utils.data import DataLoader, WeightedRandomSampler
 from sklearn.metrics import (
     confusion_matrix,
     ConfusionMatrixDisplay,
@@ -128,7 +129,7 @@ def main():
     files = sorted(glob.glob(data_dir))
     print("[TRAIN] Found", len(files), "NPZ files")
 
-    dataset = StressEEGDataset(files, input_key="X_NORM")
+    dataset = StressEEGDataset(files, input_key="X_PSD")
     train_set, val_set = split_dataset(dataset)
     train_labels = []
     for i in range(len(train_set)):
@@ -147,8 +148,7 @@ def main():
     train_loader = DataLoader(train_set,batch_size=128,sampler = sampler ,shuffle=False)
     
     val_loader = DataLoader(val_set, batch_size=128, shuffle=False)
-    # Save class distribution plot (for presentation)
-    save_class_distribution_plot(train_labels)
+
 
     # ------------------------
     # Initialize model
@@ -167,8 +167,7 @@ def main():
     # Optimizer and loss
     # ------------------------
     optimizer = model.configure_optimizers(lr=0.005, weight_decay=1e-4)
-    criterion = nn.CrossEntropyLoss()
-
+    criterion = nn.CrossEntropyLoss()  # logits: [B, 2], labels: [B]
     
     # ------------------------
     # Checkpoint loading (Resume Training)
@@ -191,11 +190,10 @@ def main():
     # Training loop
     # ------------------------
     print("\n[TRAIN] Starting training...\n")
-    num_epochs = 100
+    num_epochs = 40
     best_val_acc = 0.0
     patience = 10
     patience_counter = 0
-    history = []
     for epoch in range(num_epochs):
         model.train()
         total_loss = 0.0
@@ -244,24 +242,12 @@ def main():
         val_acc = correct / total
         print(f"[EPOCH {epoch+1}/{num_epochs}] Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}\n")
 
-        # ------------------------
-        # Save metrics to history + CSV
-        # ------------------------
-        history.append({
-            "epoch": epoch + 1,
-            "train_loss": avg_loss,
-            "val_loss": val_loss,
-            "val_acc": val_acc
-        })
-
-        pd.DataFrame(history).to_csv("training_history.csv", index=False)
-
-        # Update plots every epoch (so you always have latest figures)
-        save_training_plots("training_history.csv")
         if val_acc > best_val_acc:
             best_val_acc = val_acc
+            patience_counter = 0
             torch.save(model.state_dict(), "best_model.pth")
-
+        else:
+            patience_counter += 1
 
         # ------------------------
         # Save Checkpoint (Every Epoch)
@@ -281,15 +267,7 @@ def main():
             break
     print("[TRAIN] Training finished successfully")
     print(f"[TRAIN] Best Val Acc: {best_val_acc:.4f}")
-    print("\n[EVAL] Generating evaluation plots...")
-    evaluate_and_save_plots(model, val_loader, device)
 
-    print("\n[DONE] Saved images for presentation:")
-    print(" - loss_curve.png")
-    print(" - val_acc_curve.png")
-    print(" - class_distribution.png")
-    print(" - confusion_matrix.png")
-    print(" - roc_curve.png (if possible)")
 if __name__ == "__main__":
     main()
 
